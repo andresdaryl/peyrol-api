@@ -1,149 +1,199 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Optional
+from datetime import date, datetime, timezone
 from database import get_db
 from dependencies import get_current_user, require_role
 from schemas.user import User
+from models.leaves import LeaveDB, LeaveBalanceDB
 from models.employee import EmployeeDB
-from models.leaves import LeaveBalanceDB
-from utils.constants import EmployeeStatus, SalaryType, UserRole, LeaveCredits
-from datetime import date
+from services.leave_calculator import LeaveCalculator
+from utils.constants import LeaveType, LeaveStatus, UserRole, LeaveCredits, EmployeeStatus
 from pydantic import BaseModel
 import uuid
 
-router = APIRouter(prefix="/employees", tags=["Employees"])
+router = APIRouter(prefix="/leaves", tags=["Leaves"])
 
-class EmployeeCreate(BaseModel):
-    name: str
-    contact: str
-    role: str
-    department: Optional[str] = None
-    salary_type: SalaryType
-    salary_rate: float
-    benefits: Optional[dict] = None
-    taxes: Optional[dict] = None
-    overtime_rate: Optional[float] = None
-    nightshift_rate: Optional[float] = None
+# Schemas
+class LeaveCreate(BaseModel):
+    employee_id: str
+    leave_type: LeaveType
+    start_date: date
+    end_date: date
+    reason: Optional[str] = None
+    attachment_url: Optional[str] = None
 
-class EmployeeUpdate(BaseModel):
-    name: Optional[str] = None
-    contact: Optional[str] = None
-    role: Optional[str] = None
-    department: Optional[str] = None
-    salary_type: Optional[SalaryType] = None
-    salary_rate: Optional[float] = None
-    benefits: Optional[dict] = None
-    taxes: Optional[dict] = None
-    overtime_rate: Optional[float] = None
-    nightshift_rate: Optional[float] = None
-    status: Optional[EmployeeStatus] = None
+class LeaveUpdate(BaseModel):
+    status: Optional[LeaveStatus] = None
+    rejection_reason: Optional[str] = None
 
-@router.get("")
-async def get_employees(
-    page: int = 1,
-    limit: int = 10,
-    search: Optional[str] = None,
-    sort_by: Optional[str] = "created_at",
-    sort_order: Optional[str] = "desc",
-    status: Optional[str] = None,
+class LeaveResponse(BaseModel):
+    id: str
+    employee_id: str
+    leave_type: LeaveType
+    start_date: date
+    end_date: date
+    days_count: int
+    reason: Optional[str]
+    status: LeaveStatus
+    approved_by: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class LeaveCreditsAssignment(BaseModel):
+    employee_id: str
+    sick_leave: float
+    vacation_leave: float
+    reason: Optional[str] = None        
+
+# Routes
+@router.post("", response_model=LeaveResponse)
+async def request_leave(
+    leave_data: LeaveCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all employees with pagination, search, and filters"""
-    query = db.query(EmployeeDB)
+    """Request a leave"""
     
-    if search:
-        query = query.filter(
-            (EmployeeDB.name.ilike(f"%{search}%")) |
-            (EmployeeDB.role.ilike(f"%{search}%")) |
-            (EmployeeDB.department.ilike(f"%{search}%"))
+    # Verify employee exists
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == leave_data.employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Calculate working days
+    days_count = LeaveCalculator.calculate_working_days(
+        leave_data.start_date,
+        leave_data.end_date,
+        db
+    )
+    
+    # Check leave balance for paid leaves
+    if leave_data.leave_type in [LeaveType.SICK_LEAVE, LeaveType.VACATION_LEAVE]:
+        has_balance, available = LeaveCalculator.check_leave_balance(
+            db, leave_data.employee_id, leave_data.leave_type, days_count
         )
+        if not has_balance:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient leave balance. Available: {available} days, Requested: {days_count} days"
+            )
     
+    # Create leave request
+    new_leave = LeaveDB(
+        id=str(uuid.uuid4()),
+        employee_id=leave_data.employee_id,
+        leave_type=leave_data.leave_type,
+        start_date=leave_data.start_date,
+        end_date=leave_data.end_date,
+        days_count=days_count,
+        reason=leave_data.reason,
+        attachment_url=leave_data.attachment_url,
+        status=LeaveStatus.PENDING
+    )
+    
+    db.add(new_leave)
+    db.commit()
+    db.refresh(new_leave)
+    
+    return new_leave
+
+@router.get("", response_model=List[LeaveResponse])
+async def get_leaves(
+    employee_id: Optional[str] = None,
+    status: Optional[LeaveStatus] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get leave requests"""
+    query = db.query(LeaveDB)
+    
+    if employee_id:
+        query = query.filter(LeaveDB.employee_id == employee_id)
     if status:
-        query = query.filter(EmployeeDB.status == status)
+        query = query.filter(LeaveDB.status == status)
     
-    total = query.count()
-    skip = (page - 1) * limit
+    leaves = query.order_by(LeaveDB.created_at.desc()).all()
+    return leaves
+
+@router.put("/{leave_id}", response_model=LeaveResponse)
+async def update_leave(
+    leave_id: str,
+    leave_update: LeaveUpdate,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.SUPERADMIN])),
+    db: Session = Depends(get_db)
+):
+    """Approve/reject leave request"""
     
-    sort_column = getattr(EmployeeDB, sort_by, EmployeeDB.created_at)
-    if sort_order == "desc":
-        query = query.order_by(sort_column.desc())
-    else:
-        query = query.order_by(sort_column.asc())
+    leave = db.query(LeaveDB).filter(LeaveDB.id == leave_id).first()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
     
-    employees = query.offset(skip).limit(limit).all()
+    if leave_update.status == LeaveStatus.APPROVED:
+        # Deduct from leave balance
+        LeaveCalculator.deduct_leave(
+            db, leave.employee_id, leave.leave_type, leave.days_count
+        )
+        leave.approved_by = current_user.id
+        leave.approved_at = datetime.now(timezone.utc)
+    
+    elif leave_update.status == LeaveStatus.REJECTED:
+        leave.rejection_reason = leave_update.rejection_reason
+    
+    elif leave_update.status == LeaveStatus.CANCELLED:
+        # Restore leave balance if it was approved
+        if leave.status == LeaveStatus.APPROVED:
+            LeaveCalculator.restore_leave(
+                db, leave.employee_id, leave.leave_type, leave.days_count
+            )
+    
+    leave.status = leave_update.status
+    db.commit()
+    db.refresh(leave)
+    
+    return leave
+
+@router.get("/balance/{employee_id}")
+async def get_leave_balance(
+    employee_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get employee leave balance"""
+    
+    balance = db.query(LeaveBalanceDB).filter(
+        LeaveBalanceDB.employee_id == employee_id
+    ).first()
+    
+    if not balance:
+        # Initialize balance for new employee
+        from datetime import datetime
+        balance = LeaveBalanceDB(
+            id=str(uuid.uuid4()),
+            employee_id=employee_id,
+            year=datetime.now().year,
+            sick_leave_balance=15.0,
+            vacation_leave_balance=15.0
+        )
+        db.add(balance)
+        db.commit()
+        db.refresh(balance)
     
     return {
-        "data": employees,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "pages": (total + limit - 1) // limit
+        "employee_id": balance.employee_id,
+        "year": balance.year,
+        "sick_leave": {
+            "balance": balance.sick_leave_balance,
+            "used": balance.sick_leave_used,
+            "total": balance.sick_leave_balance + balance.sick_leave_used
+        },
+        "vacation_leave": {
+            "balance": balance.vacation_leave_balance,
+            "used": balance.vacation_leave_used,
+            "total": balance.vacation_leave_balance + balance.vacation_leave_used
+        }
     }
-
-@router.get("/{employee_id}")
-async def get_employee(
-    employee_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get employee by ID"""
-    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
-
-@router.post("")
-async def create_employee(
-    employee_create: EmployeeCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Create new employee"""
-    new_employee = EmployeeDB(
-        id=str(uuid.uuid4()),
-        **employee_create.dict()
-    )
-    db.add(new_employee)
-    db.commit()
-    db.refresh(new_employee)
-    return new_employee
-
-@router.put("/{employee_id}")
-async def update_employee(
-    employee_id: str,
-    employee_update: EmployeeUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Update employee"""
-    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    update_data = employee_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(employee, field, value)
-    
-    db.commit()
-    db.refresh(employee)
-    return employee
-
-@router.delete("/{employee_id}")
-async def delete_employee(
-    employee_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Soft delete employee (set to inactive)"""
-    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    employee.status = EmployeeStatus.INACTIVE
-    db.commit()
-    return {"message": "Employee deactivated successfully"}
-
 
 @router.post("/initialize-balance/{employee_id}")
 async def initialize_leave_balance(
@@ -206,25 +256,28 @@ async def initialize_leave_balance(
 
 @router.post("/assign-credits")
 async def assign_leave_credits(
-    employee_id: str,
-    sick_leave: float,
-    vacation_leave: float,
-    reason: Optional[str] = None,
+    assignment: LeaveCreditsAssignment,  # ✅ Now accepts body instead of query params
     current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.SUPERADMIN])),
     db: Session = Depends(get_db)
 ):
     """Manually assign/adjust leave credits (HR override)"""
     
     balance = db.query(LeaveBalanceDB).filter(
-        LeaveBalanceDB.employee_id == employee_id
+        LeaveBalanceDB.employee_id == assignment.employee_id
     ).first()
     
     if not balance:
         raise HTTPException(status_code=404, detail="Leave balance not found. Initialize first.")
     
-    # Apply caps
-    new_sick = min(balance.sick_leave_balance + sick_leave, LeaveCredits.MAX_ACCUMULATED_SICK_LEAVE)
-    new_vacation = min(balance.vacation_leave_balance + vacation_leave, LeaveCredits.MAX_ACCUMULATED_VACATION_LEAVE)
+    # Apply caps (but allow going below if deducting)
+    new_sick = balance.sick_leave_balance + assignment.sick_leave
+    new_vacation = balance.vacation_leave_balance + assignment.vacation_leave
+    
+    # Only apply max cap when adding (allow negative/zero balances for deductions)
+    if assignment.sick_leave > 0:
+        new_sick = min(new_sick, LeaveCredits.MAX_ACCUMULATED_SICK_LEAVE)
+    if assignment.vacation_leave > 0:
+        new_vacation = min(new_vacation, LeaveCredits.MAX_ACCUMULATED_VACATION_LEAVE)
     
     old_sick = balance.sick_leave_balance
     old_vacation = balance.vacation_leave_balance
@@ -235,24 +288,23 @@ async def assign_leave_credits(
     db.commit()
     db.refresh(balance)
     
-    # Log the adjustment (you can create an audit table for this)
     return {
         "message": "Leave credits adjusted",
-        "employee_id": employee_id,
+        "employee_id": assignment.employee_id,
         "changes": {
             "sick_leave": {
-                "old": old_sick,
-                "adjustment": sick_leave,
-                "new": new_sick
+                "old": round(old_sick, 1),
+                "adjustment": assignment.sick_leave,
+                "new": round(new_sick, 1)
             },
             "vacation_leave": {
-                "old": old_vacation,
-                "adjustment": vacation_leave,
-                "new": new_vacation
+                "old": round(old_vacation, 1),
+                "adjustment": assignment.vacation_leave,
+                "new": round(new_vacation, 1)
             }
         },
         "adjusted_by": current_user.email,
-        "reason": reason
+        "reason": assignment.reason
     }
 
 
@@ -401,57 +453,4 @@ async def get_all_leave_balances(
     return {
         "total_employees": len(summary),
         "balances": summary
-    }
-
-
-@router.post("/{employee_id}/initialize-leaves")
-async def auto_initialize_leaves_on_create(
-    employee_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Auto-initialize leave balance when employee is created"""
-    
-    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Check if already initialized
-    existing = db.query(LeaveBalanceDB).filter(
-        LeaveBalanceDB.employee_id == employee_id
-    ).first()
-    
-    if existing:
-        return {"message": "Leave balance already exists", "balance": existing}
-    
-    # Calculate prorated credits
-    from datetime import datetime
-    hire_date = employee.created_at.date()
-    current_year = datetime.now().year
-    
-    days_remaining = (date(current_year, 12, 31) - hire_date).days
-    prorate_factor = max(0, min(1, days_remaining / 365))
-    
-    sick_credits = round(LeaveCredits.SICK_LEAVE_ANNUAL * prorate_factor, 1)
-    vacation_credits = round(LeaveCredits.VACATION_LEAVE_ANNUAL * prorate_factor, 1)
-    
-    # Create balance
-    new_balance = LeaveBalanceDB(
-        id=str(uuid.uuid4()),
-        employee_id=employee_id,
-        year=current_year,
-        sick_leave_balance=sick_credits,
-        vacation_leave_balance=vacation_credits
-    )
-    
-    db.add(new_balance)
-    db.commit()
-    db.refresh(new_balance)
-    
-    return {
-        "message": "Leave balance initialized automatically",
-        "employee_id": employee_id,
-        "sick_leave": sick_credits,
-        "vacation_leave": vacation_credits,
-        "prorated": prorate_factor < 1
     }

@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from typing import Dict, Any
 from models.employee import EmployeeDB
 from models.attendance import AttendanceDB
-from utils.constants import SalaryType
+from utils.constants import SalaryType, AttendanceStatus
 from services.benefits_calculator import BenefitsCalculator
+from services.holiday_calculator import HolidayCalculator
 
 class PayrollCalculator:
-    """Calculate payroll for employees"""
+    """Calculate payroll for employees with all deductions and premiums"""
     
     @staticmethod
     def calculate_work_hours(time_in: str, time_out: str) -> float:
@@ -44,7 +45,7 @@ class PayrollCalculator:
         start_date: date, 
         end_date: date
     ) -> Dict[str, Any]:
-        """Calculate complete payroll for a single employee"""
+        """Calculate complete payroll for a single employee including all deductions and premiums"""
         
         employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
         if not employee:
@@ -57,35 +58,109 @@ class PayrollCalculator:
             AttendanceDB.date <= end_date
         ).all()
         
-        # Calculate totals
-        total_work_hours = 0.0
+        # Calculate hourly and daily rates
+        if employee.salary_type == SalaryType.HOURLY:
+            hourly_rate = employee.salary_rate
+            daily_rate = hourly_rate * 8
+        elif employee.salary_type == SalaryType.DAILY:
+            daily_rate = employee.salary_rate
+            hourly_rate = daily_rate / 8
+        else:  # MONTHLY
+            daily_rate = employee.salary_rate / 30
+            hourly_rate = daily_rate / 8
+        
+        # Initialize totals
+        total_regular_hours = 0.0
         total_overtime_hours = 0.0
         total_nightshift_hours = 0.0
-        total_work_days = len(attendance_records)
+        total_work_days = 0
+        
+        # Deductions tracking
+        total_late_deduction = 0.0
+        total_absent_deduction = 0.0
+        total_undertime_deduction = 0.0
+        
+        # Holiday tracking
+        holiday_premium_pay = 0.0
+        holiday_overtime_pay = 0.0
+        
+        # Status counts (for reporting)
+        status_counts = {
+            'present': 0,
+            'late': 0,
+            'absent': 0,
+            'undertime': 0,
+            'half_day': 0,
+            'on_leave': 0
+        }
         
         for record in attendance_records:
-            work_hours = PayrollCalculator.calculate_work_hours(record.time_in, record.time_out)
-            total_work_hours += work_hours
-            total_overtime_hours += record.overtime_hours
-            total_nightshift_hours += record.nightshift_hours
+            # Track status
+            status_key = record.status.value if hasattr(record.status, 'value') else str(record.status)
+            if status_key in status_counts:
+                status_counts[status_key] += 1
+            
+            # Skip if on leave (paid leave doesn't affect regular pay)
+            if record.status == AttendanceStatus.ON_LEAVE:
+                total_work_days += 1  # Count as worked for paid leave
+                continue
+            
+            # Track deductions
+            total_late_deduction += record.late_deduction or 0
+            total_absent_deduction += record.absent_deduction or 0
+            total_undertime_deduction += record.undertime_deduction or 0
+            
+            # If absent, skip work hours calculation
+            if record.status == AttendanceStatus.ABSENT:
+                continue
+            
+            # Calculate work hours
+            if record.time_in and record.time_out:
+                work_hours = PayrollCalculator.calculate_work_hours(record.time_in, record.time_out)
+                
+                # Check if it's a holiday
+                if record.is_holiday and record.holiday_id:
+                    # Get holiday details
+                    from models.holidays import HolidayDB
+                    holiday = db.query(HolidayDB).filter(HolidayDB.id == record.holiday_id).first()
+                    
+                    if holiday:
+                        # Calculate holiday pay
+                        holiday_calc = HolidayCalculator.calculate_holiday_pay(
+                            daily_rate=daily_rate,
+                            holiday_type=holiday.holiday_type,
+                            worked=True,
+                            hours_worked=work_hours,
+                            overtime_hours=record.overtime_hours
+                        )
+                        
+                        holiday_premium_pay += holiday_calc['base_pay']
+                        holiday_overtime_pay += holiday_calc['overtime_pay']
+                else:
+                    # Regular day
+                    total_regular_hours += work_hours
+                    total_work_days += 1
+            
+            total_overtime_hours += record.overtime_hours or 0
+            total_nightshift_hours += record.nightshift_hours or 0
         
         # Calculate base pay
         base_pay = 0.0
         if employee.salary_type == SalaryType.HOURLY:
-            base_pay = total_work_hours * employee.salary_rate
+            base_pay = total_regular_hours * hourly_rate
         elif employee.salary_type == SalaryType.DAILY:
-            base_pay = total_work_days * employee.salary_rate
+            base_pay = total_work_days * daily_rate
         elif employee.salary_type == SalaryType.MONTHLY:
             period_days = (end_date - start_date).days + 1
             base_pay = (employee.salary_rate / 30) * period_days
         
-        # Calculate additional pays
-        overtime_pay = total_overtime_hours * (employee.overtime_rate or 0)
-        nightshift_pay = total_nightshift_hours * (employee.nightshift_rate or 0)
+        # Calculate additional pays (non-holiday)
+        overtime_pay = total_overtime_hours * (employee.overtime_rate or (hourly_rate * 1.25))
+        nightshift_pay = total_nightshift_hours * (employee.nightshift_rate or (hourly_rate * 1.10))
         
         # Calculate monthly equivalent for benefits
         monthly_salary = PayrollCalculator.convert_to_monthly_salary(
-            employee, total_work_days, total_work_hours
+            employee, total_work_days, total_regular_hours
         )
         
         # Calculate mandatory contributions
@@ -95,7 +170,10 @@ class PayrollCalculator:
         deductions = {
             'sss': contributions['sss']['employee'],
             'philhealth': contributions['philhealth']['employee'],
-            'pagibig': contributions['pagibig']['employee']
+            'pagibig': contributions['pagibig']['employee'],
+            'late': total_late_deduction,
+            'absent': total_absent_deduction,
+            'undertime': total_undertime_deduction
         }
         
         # Add custom taxes/deductions from employee record
@@ -106,7 +184,11 @@ class PayrollCalculator:
         benefits_total = sum((employee.benefits or {}).values())
         deductions_total = sum(deductions.values())
         
-        gross = base_pay + overtime_pay + nightshift_pay + benefits_total
+        # Gross includes base pay, overtime, nightshift, holiday premiums, and benefits
+        gross = (base_pay + overtime_pay + nightshift_pay + 
+                holiday_premium_pay + holiday_overtime_pay + benefits_total)
+        
+        # Net is gross minus all deductions
         net = round(gross - deductions_total, 2)
         
         return {
@@ -115,11 +197,28 @@ class PayrollCalculator:
             "base_pay": round(base_pay, 2),
             "overtime_pay": round(overtime_pay, 2),
             "nightshift_pay": round(nightshift_pay, 2),
+            "holiday_premium_pay": round(holiday_premium_pay, 2),
+            "holiday_overtime_pay": round(holiday_overtime_pay, 2),
             "bonuses": None,
             "benefits": employee.benefits,
             "deductions": deductions,
             "gross": round(gross, 2),
             "net": net,
             "mandatory_contributions": contributions,
-            "monthly_salary_equivalent": round(monthly_salary, 2)
+            "monthly_salary_equivalent": round(monthly_salary, 2),
+            # Additional details for reporting
+            "attendance_summary": {
+                "total_days": len(attendance_records),
+                "work_days": total_work_days,
+                "regular_hours": round(total_regular_hours, 2),
+                "overtime_hours": round(total_overtime_hours, 2),
+                "nightshift_hours": round(total_nightshift_hours, 2),
+                "status_breakdown": status_counts,
+                "deductions_breakdown": {
+                    "late": round(total_late_deduction, 2),
+                    "absent": round(total_absent_deduction, 2),
+                    "undertime": round(total_undertime_deduction, 2),
+                    "total": round(total_late_deduction + total_absent_deduction + total_undertime_deduction, 2)
+                }
+            }
         }

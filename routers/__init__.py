@@ -1,7 +1,7 @@
 """
 Routers package - contains all API route handlers
 """
-from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard
+from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, leaves, holidays
 
 __all__ = [
     'auth',
@@ -11,5 +11,7 @@ __all__ = [
     'payroll',
     'payslips',
     'reports',
-    'dashboard'
+    'dashboard',
+    'leaves',
+    'holidays'
 ]

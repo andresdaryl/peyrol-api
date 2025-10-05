@@ -102,3 +102,78 @@ class PhilippineBenefits:
     PAGIBIG_MAX_EMPLOYEE = 100.00  # Maximum employee contribution
     PAGIBIG_MAX_EMPLOYER = 100.00  # Maximum employer contribution
     PAGIBIG_SALARY_CAP = 5000.00  # Salary cap for calculation
+
+class AttendanceStatus(str, Enum):
+    PRESENT = "present"
+    LATE = "late"
+    ABSENT = "absent"
+    UNDERTIME = "undertime"
+    HALF_DAY = "half_day"
+    ON_LEAVE = "on_leave"
+
+class LeaveType(str, Enum):
+    SICK_LEAVE = "sick_leave"
+    VACATION_LEAVE = "vacation_leave"
+    EMERGENCY_LEAVE = "emergency_leave"
+    MATERNITY_LEAVE = "maternity_leave"
+    PATERNITY_LEAVE = "paternity_leave"
+    UNPAID_LEAVE = "unpaid_leave"
+
+class LeaveStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+class HolidayType(str, Enum):
+    REGULAR_HOLIDAY = "regular_holiday"  # 200% pay
+    SPECIAL_HOLIDAY = "special_holiday"  # 130% pay
+
+# Philippine Labor Law Rates
+class AttendanceDeductionRates:
+    """Deduction rates based on Philippine labor practices"""
+    
+    # Late deductions (per minute or hour)
+    LATE_GRACE_PERIOD_MINUTES = 10  # No deduction for first 10 minutes
+    LATE_DEDUCTION_PER_MINUTE = True  # Deduct per minute after grace period
+    
+    # Absent deduction
+    ABSENT_FULL_DAY_DEDUCTION = 1.0  # 100% of daily rate
+    
+    # Undertime deduction
+    UNDERTIME_DEDUCTION_PER_MINUTE = True  # Deduct per minute
+    
+    # Half-day threshold
+    HALF_DAY_HOURS = 4  # Less than 4 hours = half day
+
+# Holiday Pay Rates (Philippine Labor Code)
+class HolidayPayRates:
+    """
+    Based on Philippine Labor Code:
+    - Regular Holiday (not worked): 100% pay
+    - Regular Holiday (worked): 200% pay (100% + 100% premium)
+    - Special Holiday (not worked): 0% pay (no work, no pay)
+    - Special Holiday (worked): 130% pay (100% + 30% premium)
+    """
+    
+    REGULAR_HOLIDAY_NOT_WORKED = 1.0  # 100%
+    REGULAR_HOLIDAY_WORKED = 2.0  # 200%
+    SPECIAL_HOLIDAY_NOT_WORKED = 0.0  # 0% (no work, no pay)
+    SPECIAL_HOLIDAY_WORKED = 1.3  # 130%
+    
+    # Overtime on holidays
+    REGULAR_HOLIDAY_OT_RATE = 2.6  # 200% + 30% OT
+    SPECIAL_HOLIDAY_OT_RATE = 1.69  # 130% + 30% OT
+
+# Leave Credits (Philippine Labor Code)
+class LeaveCredits:
+    """Standard leave credits per year"""
+    
+    SICK_LEAVE_ANNUAL = 15  # 15 days/year
+    VACATION_LEAVE_ANNUAL = 15  # 15 days/year
+    MATERNITY_LEAVE = 105  # 105 days (expanded maternity leave)
+    PATERNITY_LEAVE = 7  # 7 days
+    
+    # Accumulation rules
+    MAX_ACCUMULATED_SICK_LEAVE = 30
+    MAX_ACCUMULATED_VACATION_LEAVE = 30
