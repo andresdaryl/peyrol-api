@@ -1,0 +1,82 @@
+# Virtual environment
+venv/
+.env
+.venv/
+ENV/
+env.bak/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs and debug
+*.log
+*.out
+*.err
+*.pid
+*.dump
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# Unit test / coverage reports
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+.cache
+
+# Reports and generated files
+reports/
+generated_reports/
+output/
+pdfs/
+*.pdf
+
+# Database files
+*.db
+*.sqlite3
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Pip and build
+pip-wheel-metadata/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Migrations (if Alembic autogenerate files)
+alembic.ini
+alembic/versions/*.pyc
+alembic/versions/__pycache__/
+alembic/versions/*.log
+
+# Backup / temp files
+*.bak
+*.tmp
+*.swp
+*.swo
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Local scripts or notes
+notes/
+scripts_local/
