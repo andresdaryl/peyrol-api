@@ -5,7 +5,7 @@ from database import init_db
 import logging
 
 # Import routers
-from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, holidays, leaves
+from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, holidays, leaves, company
 
 # Configure logging
 logging.basicConfig(
@@ -41,6 +41,7 @@ app.include_router(reports.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(holidays.router, prefix="/api")
 app.include_router(leaves.router, prefix="/api")
+app.include_router(company.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():

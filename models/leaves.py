@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, DateTime, Date, Text, Integer, Float, Enum as SQLEnum
+from sqlalchemy import Column, String, DateTime, Date, Text, Integer, Float, Enum as SQLEnum, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database import Base
 from utils.constants import LeaveType, LeaveStatus
@@ -8,7 +9,7 @@ class LeaveDB(Base):
     __tablename__ = "leaves"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    employee_id = Column(String, nullable=False, index=True)
+    employee_id = Column(String, ForeignKey("employees.id"))
     leave_type = Column(SQLEnum(LeaveType), nullable=False)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
@@ -27,22 +28,23 @@ class LeaveDB(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
+    employee = relationship("EmployeeDB", back_populates="leaves")
+
 
 class LeaveBalanceDB(Base):
     __tablename__ = "leave_balances"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    employee_id = Column(String, unique=True, nullable=False, index=True)
+    employee_id = Column(String, ForeignKey("employees.id"))
     
-    # Current balances
     sick_leave_balance = Column(Float, default=15.0)
     vacation_leave_balance = Column(Float, default=15.0)
     
-    # Year tracking
     year = Column(Integer, nullable=False)
     
-    # Usage tracking
     sick_leave_used = Column(Float, default=0.0)
     vacation_leave_used = Column(Float, default=0.0)
     
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    employee = relationship("EmployeeDB", back_populates="leave_balances")    

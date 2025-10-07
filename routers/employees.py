@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Optional
 from database import get_db
@@ -8,14 +8,24 @@ from models.employee import EmployeeDB
 from models.leaves import LeaveBalanceDB
 from utils.constants import EmployeeStatus, SalaryType, UserRole, LeaveCredits
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 import uuid
+import os
+import shutil
+from pathlib import Path
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
+# Create uploads directory
+UPLOAD_DIR = Path("uploads/employee_profiles")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 class EmployeeCreate(BaseModel):
     name: str
+    email: Optional[EmailStr] = None
     contact: str
+    date_of_birth: Optional[date] = None
+    hire_date: Optional[date] = None
     role: str
     department: Optional[str] = None
     salary_type: SalaryType
@@ -27,7 +37,10 @@ class EmployeeCreate(BaseModel):
 
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
+    email: Optional[EmailStr] = None
     contact: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    hire_date: Optional[date] = None
     role: Optional[str] = None
     department: Optional[str] = None
     salary_type: Optional[SalaryType] = None
@@ -37,6 +50,77 @@ class EmployeeUpdate(BaseModel):
     overtime_rate: Optional[float] = None
     nightshift_rate: Optional[float] = None
     status: Optional[EmployeeStatus] = None
+
+@router.post("/{employee_id}/upload-image")
+async def upload_employee_image(
+    employee_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload employee profile image"""
+    
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
+    
+    # Validate file size (max 5MB)
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+    
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Delete old image if exists
+    if employee.profile_image_url:
+        old_path = Path(employee.profile_image_url)
+        if old_path.exists():
+            old_path.unlink()
+    
+    # Save new image
+    file_extension = file.filename.split(".")[-1]
+    new_filename = f"{employee_id}.{file_extension}"
+    file_path = UPLOAD_DIR / new_filename
+    
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # Update employee record
+    employee.profile_image_url = str(file_path)
+    db.commit()
+    db.refresh(employee)
+    
+    return {
+        "message": "Profile image uploaded successfully",
+        "image_url": str(file_path)
+    }
+
+@router.delete("/{employee_id}/image")
+async def delete_employee_image(
+    employee_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete employee profile image"""
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if employee.profile_image_url:
+        file_path = Path(employee.profile_image_url)
+        if file_path.exists():
+            file_path.unlink()
+        
+        employee.profile_image_url = None
+        db.commit()
+        db.refresh(employee)
+    
+    return {"message": "Profile image deleted successfully"}
 
 @router.get("")
 async def get_employees(

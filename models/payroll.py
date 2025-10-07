@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Float, DateTime, Date, Integer, Boolean, JSON, Text, Enum as SQLEnum
+from sqlalchemy import Column, String, Float, DateTime, Date, Integer, Boolean, JSON, Text, Enum as SQLEnum, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database import Base
 from utils.constants import PayrollRunType, PayrollRunStatus
@@ -20,7 +21,7 @@ class PayrollEntryDB(Base):
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     payroll_run_id = Column(String, nullable=False, index=True)
-    employee_id = Column(String, nullable=False, index=True)
+    employee_id = Column(String, ForeignKey("employees.id"))
     employee_name = Column(String, nullable=False)
     base_pay = Column(Float, nullable=False)
     overtime_pay = Column(Float, default=0.0)
@@ -34,6 +35,8 @@ class PayrollEntryDB(Base):
     version = Column(Integer, default=1)
     edit_history = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    employee = relationship("EmployeeDB", back_populates="payroll_entries")
 
 
 class PayslipDB(Base):
