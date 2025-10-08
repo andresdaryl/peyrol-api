@@ -99,15 +99,27 @@ async def request_leave(
     
     return new_leave
 
-@router.get("", response_model=List[LeaveResponse])
+@router.get("")
 async def get_leaves(
+    page: int = 1,
+    limit: int = 10,    
     employee_id: Optional[str] = None,
     status: Optional[LeaveStatus] = None,
+    sort_by: Optional[str] = "created_at",
+    sort_order: Optional[str] = "desc",    
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get leave requests"""
+    """Get leave requests with pagination, search, and filters"""
     query = db.query(LeaveDB)
+
+    # Base query with joins
+    query = db.query(
+        LeaveDB,
+        EmployeeDB
+    ).join(
+        EmployeeDB, LeaveDB.employee_id == EmployeeDB.id
+    )    
     
     if employee_id:
         query = query.filter(LeaveDB.employee_id == employee_id)
@@ -115,7 +127,55 @@ async def get_leaves(
         query = query.filter(LeaveDB.status == status)
     
     leaves = query.order_by(LeaveDB.created_at.desc()).all()
-    return leaves
+
+    # Get total count
+    total = query.count()
+    
+    # Apply sorting
+    if sort_by == "employee_name":
+        sort_column = EmployeeDB.name
+    elif sort_by == "net_pay":
+        sort_column = LeaveDB.leave_type
+    elif sort_by == "gross_pay":
+        sort_column = LeaveDB.start_date
+    elif sort_by == "period_start":
+        sort_column = LeaveDB.end_date
+    else:
+        sort_column = getattr(LeaveDB, sort_by, LeaveDB.created_at)
+    
+    if sort_order == "desc":
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+    
+    # Apply pagination
+    skip = (page - 1) * limit
+    results = query.offset(skip).limit(limit).all()
+
+    # Format response
+    leaves_data = []
+    for leave, employee in results:
+        leaves_data.append({
+            "id": leave.id,
+            "employee_id": employee.id,
+            "employee_name": employee.name,
+            "leave_type": leave.leave_type,
+            "start_date": leave.start_date,
+            "end_date": leave.end_date,
+            "days_count": leave.days_count,
+            "reason": leave.reason,
+            "status": leave.status,
+            "approved_by": leave.approved_by,
+            "created_at": leave.created_at,
+        })
+    
+    return {
+        "data": leaves_data,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit
+    }
 
 @router.put("/{leave_id}", response_model=LeaveResponse)
 async def update_leave(

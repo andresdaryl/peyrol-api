@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
@@ -21,11 +21,23 @@ router = APIRouter(prefix="/payroll", tags=["Payroll"])
 
 @router.get("/runs", response_model=List[PayrollRun])
 async def get_payroll_runs(
+    start_date: Optional[date] = Query(None, description="Filter runs starting on or after this date"),
+    end_date: Optional[date] = Query(None, description="Filter runs ending on or before this date"),
+    type: Optional[str] = Query(None, description="Filter by payroll run type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all payroll runs"""
-    runs = db.query(PayrollRunDB).order_by(PayrollRunDB.created_at.desc()).all()
+    """Get all payroll runs with optional filters: start_date, end_date, and type."""
+    query = db.query(PayrollRunDB)
+
+    if start_date:
+        query = query.filter(PayrollRunDB.start_date >= start_date)
+    if end_date:
+        query = query.filter(PayrollRunDB.end_date <= end_date)
+    if type:
+        query = query.filter(PayrollRunDB.type == type)
+
+    runs = query.order_by(PayrollRunDB.created_at.desc()).all()
     return runs
 
 @router.get("/runs/{run_id}", response_model=PayrollRun)
@@ -78,16 +90,31 @@ async def update_payroll_run(
 
 @router.get("/entries", response_model=List[PayrollEntry])
 async def get_payroll_entries(
-    run_id: Optional[str] = None,
+    run_id: Optional[str] = Query(None, description="Filter by payroll run ID"),
+    employee_id: Optional[str] = Query(None, description="Filter by employee ID"),
+    version: Optional[int] = Query(None, description="Filter by version number"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Get payroll entries, optionally filtered by run_id"""
+    """
+    Get payroll entries.
+    Optional filters:
+    - run_id
+    - employee_id
+    - version
+    """
     query = db.query(PayrollEntryDB)
+
     if run_id:
         query = query.filter(PayrollEntryDB.payroll_run_id == run_id)
-    
-    entries = query.all()
+
+    if employee_id:
+        query = query.filter(PayrollEntryDB.employee_id == employee_id)
+
+    if version:
+        query = query.filter(PayrollEntryDB.version == version)
+
+    entries = query.order_by(PayrollEntryDB.created_at.desc()).all()
     return entries
 
 @router.get("/entries/{entry_id}", response_model=PayrollEntry)
