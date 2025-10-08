@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
-from main import SessionLocal, UserDB, UserRole
+from database import SessionLocal
+from models.user import UserDB
+from utils.constants import UserRole
 import uuid
 from datetime import datetime, timezone
 import bcrypt
