@@ -29,6 +29,9 @@ def initialize_sss_config(db: Session, year: str):
     # Convert tuple ranges to dict format for JSON storage
     sss_ranges = []
     for min_sal, max_sal, total_contrib, employee_share in PhilippineBenefits.SSS_RATES['ranges']:
+        if max_sal in [float('inf'), None] or str(max_sal).lower() == 'inf':
+            max_sal = 999999999
+        
         sss_ranges.append({
             "min_salary": min_sal,
             "max_salary": max_sal,
@@ -40,7 +43,7 @@ def initialize_sss_config(db: Session, year: str):
         id=str(uuid.uuid4()),
         benefit_type='sss',
         year=year,
-        is_active=True,
+        is_active=int(year) >= 2025,
         config_data={'ranges': sss_ranges},
         notes=f'SSS contribution table for {year}'
     )
@@ -63,7 +66,7 @@ def initialize_philhealth_config(db: Session, year: str):
         id=str(uuid.uuid4()),
         benefit_type='philhealth',
         year=year,
-        is_active=True,
+        is_active=int(year) >= 2025,
         config_data={
             'rate': PhilippineBenefits.PHILHEALTH_RATE,
             'max_salary': PhilippineBenefits.PHILHEALTH_MAX_SALARY,
@@ -90,7 +93,7 @@ def initialize_pagibig_config(db: Session, year: str):
         id=str(uuid.uuid4()),
         benefit_type='pagibig',
         year=year,
-        is_active=True,
+        is_active=int(year) >= 2025,
         config_data={
             'employee_rate': PhilippineBenefits.PAGIBIG_EMPLOYEE_RATE,
             'employer_rate': PhilippineBenefits.PAGIBIG_EMPLOYER_RATE,
@@ -128,7 +131,7 @@ def initialize_tax_config(db: Session, year: str):
         id=str(uuid.uuid4()),
         tax_type='withholding_tax',
         year=year,
-        is_active=True,
+        is_active=int(year) >= 2025,
         tax_brackets=tax_brackets,
         notes=f'TRAIN Law withholding tax table for {year}'
     )
