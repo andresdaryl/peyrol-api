@@ -6,6 +6,7 @@ from models.attendance import AttendanceDB
 from utils.constants import SalaryType, AttendanceStatus
 from services.benefits_calculator import BenefitsCalculator
 from services.holiday_calculator import HolidayCalculator
+from services.tax_calculator import TaxCalculator
 
 class PayrollCalculator:
     """Calculate payroll for employees with all deductions and premiums"""
@@ -37,6 +38,35 @@ class PayrollCalculator:
             # Assume 8 hours/day, 22 days/month
             return employee.salary_rate * 8 * 22
         return 0.0
+    
+    @staticmethod
+    def calculate_prorated_allowances(
+        employee: EmployeeDB,
+        work_days: int,
+        total_period_days: int,
+        status_counts: dict
+    ) -> Dict[str, float]:
+        """
+        Calculate prorated allowances based on attendance
+        Returns dict with allowance breakdown
+        """
+        if not employee.allowances:
+            return {}
+        
+        prorated_allowances = {}
+        
+        # If employee worked all days, give full allowances
+        if status_counts['absent'] == 0:
+            return employee.allowances.copy()
+        
+        # Prorate allowances based on work days
+        # Formula: (work_days / total_period_days) * allowance_amount
+        proration_factor = work_days / total_period_days if total_period_days > 0 else 0
+        
+        for allowance_name, amount in employee.allowances.items():
+            prorated_allowances[allowance_name] = round(amount * proration_factor, 2)
+        
+        return prorated_allowances
     
     @staticmethod
     def calculate_for_employee(
@@ -158,6 +188,13 @@ class PayrollCalculator:
         overtime_pay = total_overtime_hours * (employee.overtime_rate or (hourly_rate * 1.25))
         nightshift_pay = total_nightshift_hours * (employee.nightshift_rate or (hourly_rate * 1.10))
         
+        # Calculate prorated allowances based on attendance
+        total_period_days = (end_date - start_date).days + 1
+        prorated_allowances = PayrollCalculator.calculate_prorated_allowances(
+            employee, total_work_days, total_period_days, status_counts
+        )
+        allowances_total = sum(prorated_allowances.values())
+        
         # Calculate monthly equivalent for benefits
         monthly_salary = PayrollCalculator.convert_to_monthly_salary(
             employee, total_work_days, total_regular_hours
@@ -175,6 +212,14 @@ class PayrollCalculator:
             'absent': total_absent_deduction,
             'undertime': total_undertime_deduction
         }
+
+        tax_info = TaxCalculator.calculate_tax_for_payroll(
+            gross_pay=gross,
+            mandatory_contributions=contributions,
+            db=db
+        )
+
+        deductions['withholding_tax'] = tax_info['withholding_tax']        
         
         # Add custom taxes/deductions from employee record
         if employee.taxes:
@@ -184,9 +229,10 @@ class PayrollCalculator:
         benefits_total = sum((employee.benefits or {}).values())
         deductions_total = sum(deductions.values())
         
-        # Gross includes base pay, overtime, nightshift, holiday premiums, and benefits
+        # Gross includes base pay, overtime, nightshift, holiday premiums, allowances, and benefits
         gross = (base_pay + overtime_pay + nightshift_pay + 
-                holiday_premium_pay + holiday_overtime_pay + benefits_total)
+                holiday_premium_pay + holiday_overtime_pay + 
+                allowances_total + benefits_total)
         
         # Net is gross minus all deductions
         net = round(gross - deductions_total, 2)
@@ -199,14 +245,21 @@ class PayrollCalculator:
             "nightshift_pay": round(nightshift_pay, 2),
             "holiday_premium_pay": round(holiday_premium_pay, 2),
             "holiday_overtime_pay": round(holiday_overtime_pay, 2),
+            "allowances": prorated_allowances,
             "bonuses": None,
             "benefits": employee.benefits,
+            "tax_calculation": tax_info,
             "deductions": deductions,
             "gross": round(gross, 2),
             "net": net,
             "mandatory_contributions": contributions,
             "monthly_salary_equivalent": round(monthly_salary, 2),
-            # Additional details for reporting
+            "allowances_summary": {
+                "configured_allowances": employee.allowances or {},
+                "prorated_allowances": prorated_allowances,
+                "total_allowances": round(allowances_total, 2),
+                "proration_applied": status_counts['absent'] > 0
+            },
             "attendance_summary": {
                 "total_days": len(attendance_records),
                 "work_days": total_work_days,

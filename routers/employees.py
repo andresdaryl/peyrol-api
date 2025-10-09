@@ -30,6 +30,7 @@ class EmployeeCreate(BaseModel):
     department: Optional[str] = None
     salary_type: SalaryType
     salary_rate: float
+    allowances: Optional[dict] = None
     benefits: Optional[dict] = None
     taxes: Optional[dict] = None
     overtime_rate: Optional[float] = None
@@ -45,6 +46,7 @@ class EmployeeUpdate(BaseModel):
     department: Optional[str] = None
     salary_type: Optional[SalaryType] = None
     salary_rate: Optional[float] = None
+    allowances: Optional[dict] = None
     benefits: Optional[dict] = None
     taxes: Optional[dict] = None
     overtime_rate: Optional[float] = None
@@ -538,4 +540,125 @@ async def auto_initialize_leaves_on_create(
         "sick_leave": sick_credits,
         "vacation_leave": vacation_credits,
         "prorated": prorate_factor < 1
+    }
+
+@router.put("/{employee_id}/allowances")
+async def update_employee_allowances(
+    employee_id: str,
+    allowances: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update employee allowances specifically"""
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    for key, value in allowances.items():
+        if not isinstance(value, (int, float)) or value < 0:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid allowance value for '{key}'. Must be a positive number."
+            )
+    
+    old_allowances = employee.allowances or {}
+    employee.allowances = allowances
+    
+    db.commit()
+    db.refresh(employee)
+    
+    return {
+        "message": "Allowances updated successfully",
+        "employee_id": employee_id,
+        "old_allowances": old_allowances,
+        "new_allowances": allowances,
+        "total_allowances": sum(allowances.values())
+    }
+
+@router.put("/{employee_id}/taxes")
+async def update_employee_taxes(
+    employee_id: str,
+    taxes: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update employee-specific tax deductions/exemptions"""
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate taxes (all values must be numbers)
+    for key, value in taxes.items():
+        if not isinstance(value, (int, float)):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid tax value for '{key}'. Must be a number."
+            )
+    
+    old_taxes = employee.taxes or {}
+    employee.taxes = taxes
+    
+    db.commit()
+    db.refresh(employee)
+    
+    return {
+        "message": "Employee taxes updated successfully",
+        "employee_id": employee_id,
+        "old_taxes": old_taxes,
+        "new_taxes": taxes,
+        "total_additional_deductions": sum(v for k, v in taxes.items() if v > 0)
+    }
+
+@router.get("/{employee_id}/tax-preview")
+async def preview_employee_tax(
+    employee_id: str,
+    estimated_monthly_gross: Optional[float] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Preview employee's tax calculation"""
+    from services.tax_calculator import TaxCalculator
+    from services.benefits_calculator import BenefitsCalculator
+    
+    employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Use estimated gross or calculate from salary
+    if not estimated_monthly_gross:
+        if employee.salary_type == SalaryType.MONTHLY:
+            estimated_monthly_gross = employee.salary_rate
+        elif employee.salary_type == SalaryType.DAILY:
+            estimated_monthly_gross = employee.salary_rate * 22
+        elif employee.salary_type == SalaryType.HOURLY:
+            estimated_monthly_gross = employee.salary_rate * 8 * 22
+    
+    # Calculate contributions
+    contributions = BenefitsCalculator.calculate_all_contributions(estimated_monthly_gross, db)
+    
+    # Calculate tax
+    tax_info = TaxCalculator.calculate_tax_for_payroll(
+        gross_pay=estimated_monthly_gross,
+        mandatory_contributions=contributions,
+        db=db
+    )
+    
+    # Include custom deductions
+    custom_deductions = sum((employee.taxes or {}).values())
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": employee.name,
+        "estimated_monthly_gross": estimated_monthly_gross,
+        "mandatory_contributions": {
+            "sss": contributions['sss']['employee'],
+            "philhealth": contributions['philhealth']['employee'],
+            "pagibig": contributions['pagibig']['employee'],
+            "total": contributions['total_employee']
+        },
+        "withholding_tax": tax_info['withholding_tax'],
+        "custom_deductions": employee.taxes or {},
+        "total_custom_deductions": custom_deductions,
+        "total_deductions": contributions['total_employee'] + tax_info['withholding_tax'] + custom_deductions,
+        "estimated_net_pay": estimated_monthly_gross - contributions['total_employee'] - tax_info['withholding_tax'] - custom_deductions
     }

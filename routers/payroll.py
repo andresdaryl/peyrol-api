@@ -135,7 +135,7 @@ async def generate_payroll_entries(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Auto-generate payroll entries with mandatory contributions"""
+    """Auto-generate payroll entries with mandatory contributions and allowances"""
     run_data = db.query(PayrollRunDB).filter(PayrollRunDB.id == run_id).first()
     if not run_data:
         raise HTTPException(status_code=404, detail="Payroll run not found")
@@ -147,7 +147,7 @@ async def generate_payroll_entries(
     
     generated_entries = []
     for employee in employees:
-        # Calculate payroll with mandatory contributions
+        # Calculate payroll with mandatory contributions and allowances
         calc_result = PayrollCalculator.calculate_for_employee(
             db, employee.id, run_data.start_date, run_data.end_date
         )
@@ -162,6 +162,7 @@ async def generate_payroll_entries(
                 base_pay=calc_result['base_pay'],
                 overtime_pay=calc_result['overtime_pay'],
                 nightshift_pay=calc_result['nightshift_pay'],
+                allowances=calc_result['allowances'],
                 bonuses=calc_result['bonuses'],
                 benefits=calc_result['benefits'],
                 deductions=calc_result['deductions'],
@@ -186,7 +187,8 @@ async def generate_payroll_entries(
                 total_employee_contribution=contributions['total_employee'],
                 calculation_details={
                     'monthly_salary': calc_result['monthly_salary_equivalent'],
-                    'period': f"{run_data.start_date} to {run_data.end_date}"
+                    'period': f"{run_data.start_date} to {run_data.end_date}",
+                    'allowances_summary': calc_result.get('allowances_summary', {})
                 }
             )
             db.add(mandatory_contrib)
@@ -223,19 +225,21 @@ async def update_payroll_entry(
     
     # Recalculate if financial fields are updated
     if any(k in update_data for k in ["base_pay", "overtime_pay", "nightshift_pay", 
-                                       "bonuses", "benefits", "deductions"]):
+                                       "allowances", "bonuses", "benefits", "deductions"]):
         base_pay = update_data.get("base_pay", entry.base_pay)
         overtime_pay = update_data.get("overtime_pay", entry.overtime_pay)
         nightshift_pay = update_data.get("nightshift_pay", entry.nightshift_pay)
+        allowances = update_data.get("allowances", entry.allowances or {})
         bonuses = update_data.get("bonuses", entry.bonuses or {})
         benefits = update_data.get("benefits", entry.benefits or {})
         deductions = update_data.get("deductions", entry.deductions or {})
         
+        allowances_total = sum(allowances.values()) if allowances else 0
         bonuses_total = sum(bonuses.values()) if bonuses else 0
         benefits_total = sum(benefits.values()) if benefits else 0
         deductions_total = sum(deductions.values()) if deductions else 0
         
-        gross = base_pay + overtime_pay + nightshift_pay + bonuses_total + benefits_total
+        gross = base_pay + overtime_pay + nightshift_pay + allowances_total + bonuses_total + benefits_total
         net = round(gross - deductions_total, 2)
         
         update_data["gross"] = round(gross, 2)

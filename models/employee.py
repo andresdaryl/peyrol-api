@@ -20,6 +20,7 @@ class EmployeeDB(Base):
     department = Column(String)
     salary_type = Column(SQLEnum(SalaryType), nullable=False)
     salary_rate = Column(Float, nullable=False)
+    allowances = Column(JSON)
     benefits = Column(JSON)
     taxes = Column(JSON)
     overtime_rate = Column(Float)
