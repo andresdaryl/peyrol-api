@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas.user import User, UserCreate, UserUpdate
+from schemas.user import User, UserCreate, UserUpdate, ResetPasswordRequest
 from models.user import UserDB
 from models.employee import EmployeeDB
 from services.auth import AuthService
@@ -325,7 +325,7 @@ async def activate_user(
 @router.post("/{user_id}/reset-password")
 async def reset_user_password(
     user_id: str,
-    new_password: str,
+    payload: ResetPasswordRequest,
     current_user: User = Depends(require_role([UserRole.SUPERADMIN])),
     db: Session = Depends(get_db)
 ):
@@ -335,6 +335,7 @@ async def reset_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    new_password = payload.new_password
     if len(new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     
