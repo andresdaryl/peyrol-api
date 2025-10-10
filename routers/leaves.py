@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Optional
 from datetime import date, datetime, timezone
 from database import get_db
 from dependencies import get_current_user, require_role
@@ -9,46 +9,11 @@ from models.leaves import LeaveDB, LeaveBalanceDB
 from models.employee import EmployeeDB
 from services.leave_calculator import LeaveCalculator
 from utils.constants import LeaveType, LeaveStatus, UserRole, LeaveCredits, EmployeeStatus
-from pydantic import BaseModel
+from schemas.leaves import LeaveCreate, LeaveCreditsAssignment, LeaveResponse, LeaveUpdate
 import uuid
 
 router = APIRouter(prefix="/leaves", tags=["Leaves"])
 
-# Schemas
-class LeaveCreate(BaseModel):
-    employee_id: str
-    leave_type: LeaveType
-    start_date: date
-    end_date: date
-    reason: Optional[str] = None
-    attachment_url: Optional[str] = None
-
-class LeaveUpdate(BaseModel):
-    status: Optional[LeaveStatus] = None
-    rejection_reason: Optional[str] = None
-
-class LeaveResponse(BaseModel):
-    id: str
-    employee_id: str
-    leave_type: LeaveType
-    start_date: date
-    end_date: date
-    days_count: int
-    reason: Optional[str]
-    status: LeaveStatus
-    approved_by: Optional[str]
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-class LeaveCreditsAssignment(BaseModel):
-    employee_id: str
-    sick_leave: float
-    vacation_leave: float
-    reason: Optional[str] = None        
-
-# Routes
 @router.post("", response_model=LeaveResponse)
 async def request_leave(
     leave_data: LeaveCreate,
@@ -316,7 +281,7 @@ async def initialize_leave_balance(
 
 @router.post("/assign-credits")
 async def assign_leave_credits(
-    assignment: LeaveCreditsAssignment,  # ✅ Now accepts body instead of query params
+    assignment: LeaveCreditsAssignment,
     current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.SUPERADMIN])),
     db: Session = Depends(get_db)
 ):

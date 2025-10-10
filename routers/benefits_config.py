@@ -2,25 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from database import get_db
-from dependencies import get_current_user, require_role
+from dependencies import require_role
 from schemas.user import User
 from models.benefits import BenefitsConfigDB
 from utils.constants import UserRole
-from pydantic import BaseModel
+from schemas.benefits import BenefitsConfigCreate, BenefitsConfigUpdate
 import uuid
 
 router = APIRouter(prefix="/benefits-config", tags=["Benefits Configuration"])
-
-class BenefitsConfigCreate(BaseModel):
-    benefit_type: str  # 'sss', 'philhealth', 'pagibig'
-    year: str
-    config_data: dict
-    notes: Optional[str] = None
-
-class BenefitsConfigUpdate(BaseModel):
-    config_data: Optional[dict] = None
-    notes: Optional[str] = None
-    is_active: Optional[bool] = None
 
 @router.get("")
 async def get_benefits_configs(

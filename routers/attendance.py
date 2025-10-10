@@ -12,33 +12,12 @@ from models.leaves import LeaveDB
 from services.attendance_calculator import AttendanceCalculator
 from services.holiday_calculator import HolidayCalculator
 from utils.constants import ShiftType, AttendanceStatus, LeaveStatus, SalaryType
-from pydantic import BaseModel
+from schemas.attendance import AttendanceCreate, AttendanceUpdate
 import uuid
 import pandas as pd
 import io
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
-
-class AttendanceCreate(BaseModel):
-    employee_id: str
-    date: date
-    time_in: Optional[str] = None
-    time_out: Optional[str] = None
-    shift_type: ShiftType
-    overtime_hours: float = 0.0
-    nightshift_hours: float = 0.0
-    notes: Optional[str] = None
-    expected_time_in: str = "08:00"
-    expected_time_out: str = "17:00"
-
-class AttendanceUpdate(BaseModel):
-    date: Optional[str] = None
-    time_in: Optional[str] = None
-    time_out: Optional[str] = None
-    shift_type: Optional[ShiftType] = None
-    overtime_hours: Optional[float] = None
-    nightshift_hours: Optional[float] = None
-    notes: Optional[str] = None
 
 @router.post("")
 async def create_attendance(
@@ -358,7 +337,6 @@ async def import_attendance(
                 detail=f"Missing required columns: {', '.join(missing_columns)}"
             )
         
-        # Process each row
         imported = []
         errors = []
         

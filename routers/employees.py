@@ -7,10 +7,9 @@ from schemas.user import User
 from models.employee import EmployeeDB
 from models.leaves import LeaveBalanceDB
 from utils.constants import EmployeeStatus, SalaryType, UserRole, LeaveCredits
+from schemas.employees import EmployeeCreate, EmployeeUpdate
 from datetime import date
-from pydantic import BaseModel, EmailStr
 import uuid
-import os
 import shutil
 from pathlib import Path
 
@@ -19,39 +18,6 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 # Create uploads directory
 UPLOAD_DIR = Path("uploads/employee_profiles")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-class EmployeeCreate(BaseModel):
-    name: str
-    email: Optional[EmailStr] = None
-    contact: str
-    date_of_birth: Optional[date] = None
-    hire_date: Optional[date] = None
-    role: str
-    department: Optional[str] = None
-    salary_type: SalaryType
-    salary_rate: float
-    allowances: Optional[dict] = None
-    benefits: Optional[dict] = None
-    taxes: Optional[dict] = None
-    overtime_rate: Optional[float] = None
-    nightshift_rate: Optional[float] = None
-
-class EmployeeUpdate(BaseModel):
-    name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    contact: Optional[str] = None
-    date_of_birth: Optional[date] = None
-    hire_date: Optional[date] = None
-    role: Optional[str] = None
-    department: Optional[str] = None
-    salary_type: Optional[SalaryType] = None
-    salary_rate: Optional[float] = None
-    allowances: Optional[dict] = None
-    benefits: Optional[dict] = None
-    taxes: Optional[dict] = None
-    overtime_rate: Optional[float] = None
-    nightshift_rate: Optional[float] = None
-    status: Optional[EmployeeStatus] = None
 
 @router.post("/{employee_id}/upload-image")
 async def upload_employee_image(
@@ -321,7 +287,6 @@ async def assign_leave_credits(
     db.commit()
     db.refresh(balance)
     
-    # Log the adjustment (you can create an audit table for this)
     return {
         "message": "Leave credits adjusted",
         "employee_id": employee_id,

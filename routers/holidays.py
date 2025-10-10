@@ -7,37 +7,12 @@ from dependencies import get_current_user, require_role
 from schemas.user import User
 from models.holidays import HolidayDB
 from utils.constants import HolidayType, UserRole
+from schemas.holidays import HolidayCreate, HolidayUpdate, HolidayResponse
 from pydantic import BaseModel
 import uuid
 
 router = APIRouter(prefix="/holidays", tags=["Holidays"])
 
-# Schemas
-class HolidayCreate(BaseModel):
-    name: str
-    date: date
-    holiday_type: HolidayType
-    description: Optional[str] = None
-    is_recurring: bool = False
-
-class HolidayUpdate(BaseModel):
-    name: Optional[str] = None
-    holiday_type: Optional[HolidayType] = None
-    description: Optional[str] = None
-    is_recurring: Optional[bool] = None
-
-class HolidayResponse(BaseModel):
-    id: str
-    name: str
-    date: date
-    holiday_type: HolidayType
-    description: Optional[str]
-    is_recurring: bool
-
-    class Config:
-        from_attributes = True
-
-# Routes
 @router.post("", response_model=HolidayResponse)
 async def create_holiday(
     holiday_data: HolidayCreate,
