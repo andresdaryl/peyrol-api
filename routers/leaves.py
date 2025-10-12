@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date, datetime, timezone
@@ -70,6 +71,9 @@ async def get_leaves(
     limit: int = 10,    
     employee_id: Optional[str] = None,
     status: Optional[LeaveStatus] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    leave_type: Optional[str] = None,
     sort_by: Optional[str] = "created_at",
     sort_order: Optional[str] = "desc",    
     current_user: User = Depends(get_current_user),
@@ -87,9 +91,23 @@ async def get_leaves(
     )    
     
     if employee_id:
-        query = query.filter(LeaveDB.employee_id == employee_id)
+        search_pattern = f"%{employee_id}%"
+        query = query.filter(
+            or_(
+                EmployeeDB.id.ilike(search_pattern),
+                EmployeeDB.name.ilike(search_pattern)
+            )
+        )
     if status:
         query = query.filter(LeaveDB.status == status)
+    if status:
+        query = query.filter(LeaveDB.status == status)
+    if leave_type:
+        query = query.filter(LeaveDB.leave_type == leave_type)        
+    if start_date and end_date:
+        query = query.filter(LeaveDB.start_date >= start_date, LeaveDB.end_date <= end_date)
+    if start_date:
+        query = query.filter(LeaveDB.start_date == start_date)               
     
     leaves = query.order_by(LeaveDB.created_at.desc()).all()
 
