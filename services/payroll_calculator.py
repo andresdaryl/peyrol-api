@@ -213,6 +213,13 @@ class PayrollCalculator:
             'undertime': total_undertime_deduction
         }
 
+        benefits_total = sum((employee.benefits or {}).values())        
+
+        # Gross includes base pay, overtime, nightshift, holiday premiums, allowances, and benefits
+        gross = (base_pay + overtime_pay + nightshift_pay + 
+                holiday_premium_pay + holiday_overtime_pay + 
+                allowances_total + benefits_total)        
+
         tax_info = TaxCalculator.calculate_tax_for_payroll(
             gross_pay=gross,
             mandatory_contributions=contributions,
@@ -225,14 +232,7 @@ class PayrollCalculator:
         if employee.taxes:
             deductions.update(employee.taxes)
         
-        # Calculate totals
-        benefits_total = sum((employee.benefits or {}).values())
         deductions_total = sum(deductions.values())
-        
-        # Gross includes base pay, overtime, nightshift, holiday premiums, allowances, and benefits
-        gross = (base_pay + overtime_pay + nightshift_pay + 
-                holiday_premium_pay + holiday_overtime_pay + 
-                allowances_total + benefits_total)
         
         # Net is gross minus all deductions
         net = round(gross - deductions_total, 2)
