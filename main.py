@@ -7,6 +7,9 @@ from config import settings
 from database import init_db
 import logging
 
+import sys
+print("CORS_ORIGINS:", settings.CORS_ORIGINS, file=sys.stderr)
+
 # Import routers
 from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, holidays, leaves, company, users, benefits_config, tax_config
 
