@@ -7,9 +7,6 @@ from config import settings
 from database import init_db
 import logging
 
-import sys
-print("CORS_ORIGINS:", settings.CORS_ORIGINS, file=sys.stderr)
-
 # Import routers
 from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, holidays, leaves, company, users, benefits_config, tax_config
 
@@ -34,7 +31,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_origins=settings.CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
