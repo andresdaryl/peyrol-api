@@ -26,6 +26,7 @@ class PayrollEntryUpdate(BaseModel):
     base_pay: Optional[float] = None
     overtime_pay: Optional[float] = None
     nightshift_pay: Optional[float] = None
+    allowances: Optional[Dict[str, float]] = None
     bonuses: Optional[Dict[str, float]] = None
     benefits: Optional[Dict[str, float]] = None
     deductions: Optional[Dict[str, float]] = None
@@ -38,6 +39,7 @@ class PayrollEntry(BaseModel):
     base_pay: float
     overtime_pay: float
     nightshift_pay: float
+    allowances: Optional[Dict[str, float]] = None
     bonuses: Optional[Dict[str, float]] = None
     benefits: Optional[Dict[str, float]] = None
     deductions: Optional[Dict[str, float]] = None

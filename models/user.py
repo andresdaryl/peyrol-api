@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Boolean
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
 from database import Base
@@ -14,4 +14,7 @@ class UserDB(Base):
     name = Column(String, nullable=False)
     role = Column(SQLEnum(UserRole), nullable=False)
     hashed_password = Column(String, nullable=False)
+    employee_id = Column(String, nullable=True, index=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

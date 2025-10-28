@@ -28,6 +28,10 @@ def init_db():
     from models.attendance import AttendanceDB
     from models.payroll import PayrollRunDB, PayrollEntryDB, PayslipDB
     from models.benefits import MandatoryContributionsDB
+    from models.holidays import HolidayDB
+    from models.leaves import LeaveDB, LeaveBalanceDB
+    from models.company import CompanyProfileDB
+    from models.user import UserDB    
     
     # Create all tables
     Base.metadata.create_all(bind=engine)
