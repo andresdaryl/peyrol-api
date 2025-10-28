@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
@@ -21,11 +21,23 @@ router = APIRouter(prefix="/payroll", tags=["Payroll"])
 
 @router.get("/runs", response_model=List[PayrollRun])
 async def get_payroll_runs(
+    start_date: Optional[date] = Query(None, description="Filter runs starting on or after this date"),
+    end_date: Optional[date] = Query(None, description="Filter runs ending on or before this date"),
+    type: Optional[str] = Query(None, description="Filter by payroll run type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all payroll runs"""
-    runs = db.query(PayrollRunDB).order_by(PayrollRunDB.created_at.desc()).all()
+    """Get all payroll runs with optional filters: start_date, end_date, and type."""
+    query = db.query(PayrollRunDB)
+
+    if start_date:
+        query = query.filter(PayrollRunDB.start_date >= start_date)
+    if end_date:
+        query = query.filter(PayrollRunDB.end_date <= end_date)
+    if type:
+        query = query.filter(PayrollRunDB.type == type)
+
+    runs = query.order_by(PayrollRunDB.created_at.desc()).all()
     return runs
 
 @router.get("/runs/{run_id}", response_model=PayrollRun)
@@ -78,16 +90,31 @@ async def update_payroll_run(
 
 @router.get("/entries", response_model=List[PayrollEntry])
 async def get_payroll_entries(
-    run_id: Optional[str] = None,
+    run_id: Optional[str] = Query(None, description="Filter by payroll run ID"),
+    employee_id: Optional[str] = Query(None, description="Filter by employee ID"),
+    version: Optional[int] = Query(None, description="Filter by version number"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Get payroll entries, optionally filtered by run_id"""
+    """
+    Get payroll entries.
+    Optional filters:
+    - run_id
+    - employee_id
+    - version
+    """
     query = db.query(PayrollEntryDB)
+
     if run_id:
         query = query.filter(PayrollEntryDB.payroll_run_id == run_id)
-    
-    entries = query.all()
+
+    if employee_id:
+        query = query.filter(PayrollEntryDB.employee_id == employee_id)
+
+    if version:
+        query = query.filter(PayrollEntryDB.version == version)
+
+    entries = query.order_by(PayrollEntryDB.created_at.desc()).all()
     return entries
 
 @router.get("/entries/{entry_id}", response_model=PayrollEntry)
@@ -108,7 +135,7 @@ async def generate_payroll_entries(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Auto-generate payroll entries with mandatory contributions"""
+    """Auto-generate payroll entries with mandatory contributions and allowances"""
     run_data = db.query(PayrollRunDB).filter(PayrollRunDB.id == run_id).first()
     if not run_data:
         raise HTTPException(status_code=404, detail="Payroll run not found")
@@ -120,7 +147,7 @@ async def generate_payroll_entries(
     
     generated_entries = []
     for employee in employees:
-        # Calculate payroll with mandatory contributions
+        # Calculate payroll with mandatory contributions and allowances
         calc_result = PayrollCalculator.calculate_for_employee(
             db, employee.id, run_data.start_date, run_data.end_date
         )
@@ -135,6 +162,7 @@ async def generate_payroll_entries(
                 base_pay=calc_result['base_pay'],
                 overtime_pay=calc_result['overtime_pay'],
                 nightshift_pay=calc_result['nightshift_pay'],
+                allowances=calc_result['allowances'],
                 bonuses=calc_result['bonuses'],
                 benefits=calc_result['benefits'],
                 deductions=calc_result['deductions'],
@@ -159,7 +187,8 @@ async def generate_payroll_entries(
                 total_employee_contribution=contributions['total_employee'],
                 calculation_details={
                     'monthly_salary': calc_result['monthly_salary_equivalent'],
-                    'period': f"{run_data.start_date} to {run_data.end_date}"
+                    'period': f"{run_data.start_date} to {run_data.end_date}",
+                    'allowances_summary': calc_result.get('allowances_summary', {})
                 }
             )
             db.add(mandatory_contrib)
@@ -196,19 +225,21 @@ async def update_payroll_entry(
     
     # Recalculate if financial fields are updated
     if any(k in update_data for k in ["base_pay", "overtime_pay", "nightshift_pay", 
-                                       "bonuses", "benefits", "deductions"]):
+                                       "allowances", "bonuses", "benefits", "deductions"]):
         base_pay = update_data.get("base_pay", entry.base_pay)
         overtime_pay = update_data.get("overtime_pay", entry.overtime_pay)
         nightshift_pay = update_data.get("nightshift_pay", entry.nightshift_pay)
+        allowances = update_data.get("allowances", entry.allowances or {})
         bonuses = update_data.get("bonuses", entry.bonuses or {})
         benefits = update_data.get("benefits", entry.benefits or {})
         deductions = update_data.get("deductions", entry.deductions or {})
         
+        allowances_total = sum(allowances.values()) if allowances else 0
         bonuses_total = sum(bonuses.values()) if bonuses else 0
         benefits_total = sum(benefits.values()) if benefits else 0
         deductions_total = sum(deductions.values()) if deductions else 0
         
-        gross = base_pay + overtime_pay + nightshift_pay + bonuses_total + benefits_total
+        gross = base_pay + overtime_pay + nightshift_pay + allowances_total + bonuses_total + benefits_total
         net = round(gross - deductions_total, 2)
         
         update_data["gross"] = round(gross, 2)

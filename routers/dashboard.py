@@ -450,3 +450,137 @@ async def get_recent_activity(
         "recentPayrolls": payroll_data,
         "recentEmployees": employee_data
     }
+
+
+@router.get("/attendance-deductions")
+async def get_attendance_deductions_summary(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get summary of attendance deductions for a period (NEW)"""
+    
+    if not start_date:
+        start_date = date.today().replace(day=1)
+    if not end_date:
+        end_date = date.today()
+    
+    records = db.query(AttendanceDB).filter(
+        AttendanceDB.date >= start_date,
+        AttendanceDB.date <= end_date
+    ).all()
+    
+    total_late_deduction = sum(r.late_deduction or 0 for r in records)
+    total_absent_deduction = sum(r.absent_deduction or 0 for r in records)
+    total_undertime_deduction = sum(r.undertime_deduction or 0 for r in records)
+    
+    late_count = sum(1 for r in records if (r.late_minutes or 0) > 0)
+    absent_count = sum(1 for r in records if r.status == 'absent')
+    undertime_count = sum(1 for r in records if (r.undertime_minutes or 0) > 0)
+    
+    return {
+        "period": {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat()
+        },
+        "deductions": {
+            "late": {
+                "total_amount": round(total_late_deduction, 2),
+                "count": late_count
+            },
+            "absent": {
+                "total_amount": round(total_absent_deduction, 2),
+                "count": absent_count
+            },
+            "undertime": {
+                "total_amount": round(total_undertime_deduction, 2),
+                "count": undertime_count
+            },
+            "total": round(total_late_deduction + total_absent_deduction + total_undertime_deduction, 2)
+        }
+    }
+
+
+@router.get("/leave-statistics")
+async def get_leave_statistics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get leave statistics (NEW)"""
+    from models.leaves import LeaveDB, LeaveBalanceDB
+    from utils.constants import LeaveStatus, LeaveType
+    
+    # Total leaves by status
+    total_pending = db.query(LeaveDB).filter(LeaveDB.status == LeaveStatus.PENDING).count()
+    total_approved = db.query(LeaveDB).filter(LeaveDB.status == LeaveStatus.APPROVED).count()
+    total_rejected = db.query(LeaveDB).filter(LeaveDB.status == LeaveStatus.REJECTED).count()
+    
+    # Current month leaves
+    from datetime import datetime
+    first_day = datetime.now().replace(day=1).date()
+    this_month_leaves = db.query(LeaveDB).filter(
+        LeaveDB.start_date >= first_day,
+        LeaveDB.status == LeaveStatus.APPROVED
+    ).all()
+    
+    # Count by type
+    sick_leaves = sum(1 for l in this_month_leaves if l.leave_type == LeaveType.SICK_LEAVE)
+    vacation_leaves = sum(1 for l in this_month_leaves if l.leave_type == LeaveType.VACATION_LEAVE)
+    
+    # Average balances
+    balances = db.query(LeaveBalanceDB).all()
+    avg_sick_balance = sum(b.sick_leave_balance for b in balances) / len(balances) if balances else 0
+    avg_vacation_balance = sum(b.vacation_leave_balance for b in balances) / len(balances) if balances else 0
+    
+    return {
+        "pending_requests": total_pending,
+        "approved_this_month": len(this_month_leaves),
+        "total_approved": total_approved,
+        "total_rejected": total_rejected,
+        "this_month_breakdown": {
+            "sick_leave": sick_leaves,
+            "vacation_leave": vacation_leaves,
+            "other": len(this_month_leaves) - sick_leaves - vacation_leaves
+        },
+        "average_balances": {
+            "sick_leave": round(avg_sick_balance, 1),
+            "vacation_leave": round(avg_vacation_balance, 1)
+        }
+    }
+
+
+@router.get("/holiday-calendar")
+async def get_holiday_calendar(
+    year: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get upcoming holidays (NEW)"""
+    from models.holidays import HolidayDB
+    from datetime import datetime
+    from sqlalchemy import extract
+    
+    if not year:
+        year = datetime.now().year
+    
+    holidays = db.query(HolidayDB).filter(
+        extract('year', HolidayDB.date) == year,
+        HolidayDB.date >= date.today()
+    ).order_by(HolidayDB.date).limit(10).all()
+    
+    holiday_list = []
+    for h in holidays:
+        holiday_list.append({
+            "id": h.id,
+            "name": h.name,
+            "date": h.date.isoformat(),
+            "type": h.holiday_type.value,
+            "days_until": (h.date - date.today()).days
+        })
+    
+    return {
+        "year": year,
+        "upcoming_holidays": holiday_list,
+        "total_holidays": len(holiday_list)
+    }

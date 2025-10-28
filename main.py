@@ -1,11 +1,14 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from database import init_db
 import logging
 
 # Import routers
-from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard
+from routers import auth, account, employees, attendance, payroll, payslips, reports, dashboard, holidays, leaves, company, users, benefits_config, tax_config
 
 # Configure logging
 logging.basicConfig(
@@ -17,9 +20,13 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Payroll Management System",
-    description="MSME Payroll System with Philippine Benefits",
-    version="2.0.0"
+    description="Payroll Management System for micro, small, and medium enterprises. Automate salary calculations, generate payslips, and manage employees — all in one platform.",
+    version="1.0.0"
 )
+
+uploads_path = Path("uploads")
+uploads_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 
 # CORS middleware
 app.add_middleware(
@@ -39,6 +46,12 @@ app.include_router(payroll.router, prefix="/api")
 app.include_router(payslips.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(holidays.router, prefix="/api")
+app.include_router(leaves.router, prefix="/api")
+app.include_router(company.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
+app.include_router(benefits_config.router, prefix="/api")
+app.include_router(tax_config.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
