@@ -9,15 +9,19 @@ from models.leaves import LeaveBalanceDB
 from utils.constants import EmployeeStatus, SalaryType, UserRole, LeaveCredits
 from schemas.employees import EmployeeCreate, EmployeeUpdate
 from datetime import date
+from pathlib import Path
 import uuid
 import shutil
-from pathlib import Path
+from utils.supabase_client import supabase
+import os
+
+BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "employee_profiles")
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
 # Create uploads directory
-UPLOAD_DIR = Path("uploads/employee_profiles")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# UPLOAD_DIR = Path("uploads/employee_profiles")
+# UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/{employee_id}/upload-image")
 async def upload_employee_image(
@@ -44,29 +48,26 @@ async def upload_employee_image(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Delete old image if exists
-    if employee.profile_image_url:
-        old_path = Path(employee.profile_image_url)
-        if old_path.exists():
-            old_path.unlink()
+    # Generate unique filename
+    ext = file.filename.split(".")[-1]
+    filename = f"{employee_id}.{ext}"
+
+    # Upload to Supabase Storage
+    content = await file.read()
+    res = supabase.storage.from_(BUCKET_NAME).upload(filename, content, {"content-type": file.content_type})
     
-    # Save new image
-    file_extension = file.filename.split(".")[-1]
-    new_filename = f"{employee_id}.{file_extension}"
-    file_path = UPLOAD_DIR / new_filename
-    
-    with file_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if res.status_code not in (200, 201):
+        raise HTTPException(status_code=500, detail="Failed to upload image")
+
+    # Public URL
+    image_url = f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/{BUCKET_NAME}/{filename}"
     
     # Update employee record
-    employee.profile_image_url = str(file_path)
+    employee.profile_image_url = image_url
     db.commit()
     db.refresh(employee)
     
-    return {
-        "message": "Profile image uploaded successfully",
-        "image_url": str(file_path)
-    }
+    return {"message": "Profile image uploaded successfully", "image_url": image_url}
 
 @router.delete("/{employee_id}/image")
 async def delete_employee_image(
@@ -74,20 +75,20 @@ async def delete_employee_image(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete employee profile image"""
+    """Delete employee profile image from Supabase Storage"""
     employee = db.query(EmployeeDB).filter(EmployeeDB.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
+
     if employee.profile_image_url:
-        file_path = Path(employee.profile_image_url)
-        if file_path.exists():
-            file_path.unlink()
-        
+        # Extract file name from URL
+        file_name = employee.profile_image_url.split("/")[-1]
+        supabase.storage.from_(BUCKET_NAME).remove([file_name])
+
         employee.profile_image_url = None
         db.commit()
         db.refresh(employee)
-    
+
     return {"message": "Profile image deleted successfully"}
 
 @router.get("")
