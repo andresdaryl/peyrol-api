@@ -38,7 +38,7 @@ app.include_router(attendance.router, prefix="/api")
 app.include_router(payroll.router, prefix="/api")
 app.include_router(payslips.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api")  # NEW: Dashboard routes
+app.include_router(dashboard.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
@@ -54,8 +54,8 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     return {
-        "message": "Payroll Management System API",
-        "version": "2.0.0",
+        "message": "Paymora | Payroll Management System API",
+        "version": "1.0.0",
         "docs": "/docs"
     }
 

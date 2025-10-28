@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from server import SessionLocal, UserDB, UserRole
+from main import SessionLocal, UserDB, UserRole
 import uuid
 from datetime import datetime, timezone
 import bcrypt
@@ -8,11 +8,11 @@ def create_superadmin():
     db = SessionLocal()
     try:
         # Check if superadmin already exists
-        existing = db.query(UserDB).filter(UserDB.email == "admin@peyrol.com").first()
+        existing = db.query(UserDB).filter(UserDB.email == "admin@paymora.com").first()
         if existing:
             print("Superadmin already exists!")
             print("You can log in with:")
-            print("Email: admin@peyrol.com")
+            print("Email: admin@paymora.com")
             print("Password: admin123")
             return
         
@@ -23,7 +23,7 @@ def create_superadmin():
         # Create superadmin
         superadmin = UserDB(
             id=str(uuid.uuid4()),
-            email="admin@peyrol.com",
+            email="admin@paymora.com",
             name="Super Administrator",
             role=UserRole.SUPERADMIN,
             hashed_password=hashed,
@@ -33,7 +33,7 @@ def create_superadmin():
         db.add(superadmin)
         db.commit()
         print("✓ Superadmin created successfully!")
-        print("Email: admin@peyrol.com")
+        print("Email: admin@paymora.com")
         print("Password: admin123")
         
     except Exception as e:
