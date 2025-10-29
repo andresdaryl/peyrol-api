@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, extract
-from datetime import datetime, timedelta, date, timezone
+from datetime import datetime, timedelta, date, timezone, time
 from typing import Optional
 from database import get_db
 from dependencies import get_current_user
@@ -57,8 +57,8 @@ async def get_dashboard_stats(
     
     today_present = len(today_attendance)
     today_absent = active_employees - today_present
-    today_late = sum(1 for att in today_attendance if att.time_in > "09:00")  # Assuming 9 AM is on-time
-    today_on_leave = 0  # You can implement leave tracking separately
+    today_late = sum(1 for att in today_attendance if att.time_in and att.time_in > "09:00")  # Temporary 9 AM as on-time
+    today_on_leave = 0  # Implement leave tracking separately
     
     today_rate = (today_present / active_employees * 100) if active_employees > 0 else 0
     
@@ -172,7 +172,7 @@ async def get_attendance_trends(
         
         present_count = len(attendance_records)
         absent_count = total_active - present_count
-        late_count = sum(1 for att in attendance_records if att.time_in > "09:00")
+        late_count = sum(1 for att in attendance_records if att.time_in and att.time_in > "09:00")  # Temporary 9 AM as on-time
         rate = (present_count / total_active * 100) if total_active > 0 else 0
         
         present.append(present_count)
@@ -207,7 +207,7 @@ async def get_attendance_breakdown(
     
     present = len(attendance_records)
     absent = total_active - present
-    late = sum(1 for att in attendance_records if att.time_in > "09:00")
+    late = sum(1 for att in attendance_records if att.time_in and att.time_in > "09:00")  # Temporary 9 AM as on-time
     on_leave = 0  # Implement leave tracking separately
     
     return {
