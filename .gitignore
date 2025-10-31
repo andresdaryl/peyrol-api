@@ -80,3 +80,5 @@ alembic/versions/*.log
 # Local scripts or notes
 notes/
 scripts_local/
+
+uploads/
