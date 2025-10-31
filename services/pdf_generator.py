@@ -1,7 +1,7 @@
 import io
 import base64
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -10,6 +10,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from pathlib import Path
 
 pdfmetrics.registerFont(TTFont('DejaVuSans', 'fonts/DejaVuSans.ttf'))
 pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'fonts/DejaVuSans-Bold.ttf'))
@@ -21,7 +22,8 @@ class PDFGenerator:
     def generate_payslip(
         entry_data: Dict[str, Any], 
         employee_data: Dict[str, Any], 
-        payroll_run_data: Dict[str, Any]
+        payroll_run_data: Dict[str, Any],
+        company_data: Optional[Dict[str, Any]] = None
     ) -> str:
         """Generate comprehensive payslip PDF with all earnings, detailed deductions, and attendance summary."""
         
@@ -29,6 +31,10 @@ class PDFGenerator:
         doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch)
         elements = []
         styles = getSampleStyleSheet()
+
+        company_name = company_data.get("company_name", "Your Company Name") if company_data else "Your Company Name"
+        logo_url = company_data.get("logo_url") if company_data else None
+        page_width, page_height = letter
         
         title_style = ParagraphStyle(
             'CustomTitle',
@@ -50,7 +56,33 @@ class PDFGenerator:
         )
         
         elements.append(Paragraph("PAYSLIP", title_style))
-        elements.append(Paragraph("Construction Company Payroll System", subtitle_style))
+        elements.append(Paragraph(company_name, subtitle_style))
+        elements.append(Spacer(1, 0.15*inch))
+
+        logo_path = None
+        if company_data and company_data.get("logo_url"):
+            candidate = Path(company_data["logo_url"])
+            if candidate.exists():
+                logo_path = str(candidate)
+            else:
+                logo_path = None
+
+        def draw_logo_on_first_page(canvas, doc):
+            if not logo_path:
+                return
+            try:
+                logo_w = 0.75 * inch
+                logo_h = 0.75 * inch
+
+                left_margin = doc.leftMargin if getattr(doc, "leftMargin", None) is not None else 0.5 * inch
+                x = left_margin
+
+                top_margin = doc.topMargin if getattr(doc, "topMargin", None) is not None else 0.5 * inch
+                y = page_height - top_margin - (logo_h / 2)
+
+                canvas.drawImage(logo_path, x, y - logo_h/2, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass        
         
         info_data = [
             ['Employee:', employee_data['name'], 'Period:', f"{payroll_run_data['start_date']} to {payroll_run_data['end_date']}"],
@@ -216,7 +248,7 @@ class PDFGenerator:
         ))
         
         # Build PDF
-        doc.build(elements)
+        doc.build(elements, onFirstPage=draw_logo_on_first_page)
         pdf_bytes = buffer.getvalue()
         buffer.close()
         

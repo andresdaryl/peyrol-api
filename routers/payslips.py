@@ -7,6 +7,7 @@ from dependencies import get_current_user
 from schemas.user import User
 from models.payroll import PayrollEntryDB, PayrollRunDB, PayslipDB
 from models.employee import EmployeeDB
+from models.company import CompanyProfileDB
 from services.pdf_generator import PDFGenerator
 import uuid
 import base64
@@ -228,7 +229,8 @@ async def generate_payslip(
         "type": run.type.value
     }
     
-    pdf_base64 = PDFGenerator.generate_payslip(entry_dict, employee_dict, run_dict)
+    company = db.query(CompanyProfileDB).first()
+    pdf_base64 = PDFGenerator.generate_payslip(entry_dict, employee_dict, run_dict, company_data=company.__dict__)
     
     existing = db.query(PayslipDB).filter(PayslipDB.payroll_entry_id == entry_id).first()
     
